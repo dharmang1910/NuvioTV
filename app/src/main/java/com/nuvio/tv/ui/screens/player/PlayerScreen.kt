@@ -253,6 +253,9 @@ fun PlayerScreen(
     val subtitleDelayResetFocusRequester = remember { FocusRequester() }
     val subtitleDelaySyncLineFocusRequester = remember { FocusRequester() }
     var subtitleTimingConsumeNextConfirmKeyUp by remember { mutableStateOf(false) }
+    // Colour-button shortcuts: key currently held and whether its long-press action already fired.
+    var colorKeyPendingCode by remember { mutableStateOf(0) }
+    var colorKeyLongFired by remember { mutableStateOf(false) }
     var reportCodeVisible by remember { mutableStateOf(false) }
     var exitDispatched by remember { mutableStateOf(false) }
     var externalHandoffInProgress by remember { mutableStateOf(false) }
@@ -844,6 +847,69 @@ fun PlayerScreen(
                         postPlayRecommendationState.isVisible ||
                         uiState.error != null
                 if (panelOrDialogOpen) return@onKeyEvent false
+
+                // Colour buttons (Red/Green/Yellow/Blue). The pause overlay keeps its own
+                // "any key dismisses" behaviour, so it is excluded here.
+                val colorKey = playerColorKeyOf(keyEvent.nativeKeyEvent.keyCode)
+                if (colorKey != null && !uiState.showPauseOverlay) {
+                    val native = keyEvent.nativeKeyEvent
+                    if (native.action == KeyEvent.ACTION_DOWN) {
+                        if (native.repeatCount == 0) {
+                            colorKeyPendingCode = native.keyCode
+                            colorKeyLongFired = false
+                        } else if (colorKeyPendingCode == native.keyCode && !colorKeyLongFired) {
+                            colorKeyLongFired = true
+                            when (colorKey) {
+                                PlayerColorKey.RED -> {
+                                    viewModel.onEvent(PlayerEvent.OnShowSourcesPanel)
+                                    viewModel.onEvent(PlayerEvent.OnReloadSourceStreams)
+                                }
+                                PlayerColorKey.GREEN -> {
+                                    viewModel.onEvent(PlayerEvent.OnSetPlaybackSpeed(1f))
+                                }
+                                PlayerColorKey.YELLOW -> {
+                                    // Same behaviour as the INFO key: toggle the media/stream info overlay.
+                                    if (uiState.showStreamInfoOverlay) {
+                                        viewModel.onEvent(PlayerEvent.OnDismissStreamInfo)
+                                        if (hideControlsAfterStreamInfo) {
+                                            viewModel.hideControls()
+                                        }
+                                        hideControlsAfterStreamInfo = false
+                                    } else {
+                                        hideControlsAfterStreamInfo = !uiState.showControls
+                                        viewModel.onEvent(PlayerEvent.OnShowStreamInfo)
+                                    }
+                                }
+                                PlayerColorKey.BLUE -> {
+                                    if (uiState.nextEpisode?.hasAired == true) {
+                                        viewModel.onEvent(PlayerEvent.OnPlayNextEpisode)
+                                    }
+                                }
+                            }
+                        }
+                        return@onKeyEvent true
+                    }
+                    if (native.action == KeyEvent.ACTION_UP) {
+                        val wasPending = colorKeyPendingCode == native.keyCode
+                        val longFired = colorKeyLongFired
+                        colorKeyPendingCode = 0
+                        colorKeyLongFired = false
+                        if (wasPending && !longFired) {
+                            when (colorKey) {
+                                PlayerColorKey.RED -> viewModel.onEvent(PlayerEvent.OnShowSourcesPanel)
+                                PlayerColorKey.GREEN -> viewModel.onEvent(PlayerEvent.OnShowSpeedDialog)
+                                PlayerColorKey.YELLOW -> viewModel.onEvent(PlayerEvent.OnShowAudioOverlay)
+                                PlayerColorKey.BLUE -> {
+                                    // Movies have no episodes: do nothing.
+                                    if (uiState.currentSeason != null && uiState.currentEpisode != null) {
+                                        viewModel.onEvent(PlayerEvent.OnShowEpisodesPanel)
+                                    }
+                                }
+                            }
+                        }
+                        return@onKeyEvent true
+                    }
+                }
 
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_UP) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
